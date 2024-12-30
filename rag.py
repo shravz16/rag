@@ -13,7 +13,6 @@ from docx import Document as DocxDocument
 import time
 import PyPDF2
 os.environ["PINECONE_API_KEY"] = "1f784203-27de-487e-90be-b2bff7b3b8f8"
-os.environ["OPENAI_API_KEY"] = "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"
 
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 
