@@ -64,27 +64,7 @@ class RAGProcessor:
         except Exception as e:
             print(f"Error extracting PDF text: {str(e)}")
             return None
-    def save_chain_to_s3(self, chain, doc_location):
-    try:
-        import pickle
-        from datetime import datetime
-        
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"chain_{os.path.basename(doc_location)}_{timestamp}.pkl"
-        
-        # Save chain locally first
-        temp_path = f"/tmp/{filename}"
-        with open(temp_path, 'wb') as f:
-            pickle.dump(chain, f)
-            
-        # Upload to S3
-        self.s3.upload_file(temp_path, "rag-docs-31331", f"chains/{filename}")
-        os.remove(temp_path)
-        return f"chains/{filename}"
-    except Exception as e:
-        print(f"Error saving chain: {str(e)}")
-        return None
+    
     def extract_text_from_docx(self, file_path):
         doc = DocxDocument(file_path)
         return "\n".join(paragraph.text for paragraph in doc.paragraphs)
@@ -125,7 +105,7 @@ class RAGProcessor:
         retriever = docsearch.as_retriever()
         combine_docs_chain = create_stuff_documents_chain(self.llm, hub.pull("langchain-ai/retrieval-qa-chat"))
         self.retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
-        chain_path = self.save_chain_to_s3(self.retrieval_chain, source)
+        
         
     def answer_query(self, query):
         response = self.retrieval_chain.invoke({"input": query})
