@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain import hub
-from pinecone.grpc import PineconeGRPC as Pinecone
+from pinecone import Pinecone
 from pinecone import ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -29,12 +29,13 @@ class RAGProcessor:
     def setup_pinecone(self):
         self.pc = Pinecone(api_key=self.pinecone_api_key)
         self.index_name = "docs-rag-chatbot"
-        if not self.pc.has_index(self.index_name):
+        indexes = self.pc.list_indexes()
+        if self.index_name not in [idx['name'] for idx in indexes]:
             self.pc.create_index(
                 name=self.index_name,
                 dimension=1024,
                 metric="cosine",
-                spec=ServerlessSpec(cloud="aws", region="us-east-1")
+                spec=ServerlessSpec(cloud="aws", region="us-east-2")
             )
         self.index = self.pc.Index(self.index_name)
         
