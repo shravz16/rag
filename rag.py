@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain import hub
-from pinecone import Pinecone
+from pinecone.grpc import PineconeGRPC as Pinecone
 from pinecone import ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -13,6 +13,7 @@ from langchain.schema import Document
 from docx import Document as DocxDocument
 import time
 import PyPDF2
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeEmbeddings
 
 class RAGProcessor:
@@ -29,28 +30,27 @@ class RAGProcessor:
     def setup_pinecone(self):
         self.pc = Pinecone(api_key=self.pinecone_api_key)
         self.index_name = "docs-rag-chatbot"
-        indexes = self.pc.list_indexes()
-        if self.index_name not in [idx['name'] for idx in indexes]:
+        if not self.pc.has_index(self.index_name):
             self.pc.create_index(
                 name=self.index_name,
-                dimension=1024,
+                dimension=1536,
                 metric="cosine",
-                spec=ServerlessSpec(cloud="aws", region="us-east-2")
+                spec=ServerlessSpec(cloud="aws", region="us-east-1")
             )
         self.index = self.pc.Index(self.index_name)
         
     def setup_embeddings(self):
-        self.embeddings = PineconeEmbeddings(
-            model="multilingual-e5-large",
-            pinecone_api_key=self.pinecone_api_key
-        )
+         self.embeddings = OpenAIEmbeddings(
+        model="text-embedding-ada-002",
+        openai_api_key=self.openai_api_key)
         
     def setup_llm(self):
         retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
         self.llm = ChatOpenAI(
             openai_api_key=self.openai_api_key,
             model_name='gpt-4',
-            temperature=0.0
+            temperature=0.3,  # Reduced for more focused responses
+        max_tokens=1000
         )
         
     def extract_text_from_pdf(self, file_path):
@@ -64,7 +64,7 @@ class RAGProcessor:
         except Exception as e:
             print(f"Error extracting PDF text: {str(e)}")
             return None
-    
+            
     def extract_text_from_docx(self, file_path):
         doc = DocxDocument(file_path)
         return "\n".join(paragraph.text for paragraph in doc.paragraphs)
@@ -87,25 +87,36 @@ class RAGProcessor:
             raise
         
     def process_document(self, document_text, source):
+        cleaned_text = document_text.replace('\n● ', '. ').replace('\n', ' ').strip()
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50
+          chunk_size=2000,  # Increased from 500
+    chunk_overlap=500,
+            separators=[". ", "●", "\n", " ", ""]
         )
+        
         doc_chunks = text_splitter.split_text(document_text)
-        documents = [Document(page_content=chunk, metadata={"source": source}) 
-                    for chunk in doc_chunks]
-                    
+        
+        documents = [Document(
+    page_content=chunk, 
+    metadata={
+        "source": source,
+        "text": chunk  # Add text content
+    }
+) for chunk in doc_chunks]
+        print(documents)
+        
         docsearch = PineconeVectorStore.from_documents(
             documents=documents,
             index_name=self.index_name,
             embedding=self.embeddings,
             namespace="plain-docx-namespace"
         )
-        
-        retriever = docsearch.as_retriever()
-        combine_docs_chain = create_stuff_documents_chain(self.llm, hub.pull("langchain-ai/retrieval-qa-chat"))
+        print('passed till doc inn pd 3')
+        retriever = docsearch.as_retriever(  search_kwargs={
+        "k": 4 
+    })
+        combine_docs_chain = create_stuff_documents_chain(self.llm, prompt=hub.pull("langchain-ai/retrieval-qa-chat"))
         self.retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
-        
         
     def answer_query(self, query):
         response = self.retrieval_chain.invoke({"input": query})
@@ -125,7 +136,7 @@ class RAGProcessor:
                     
                     doc_location = body['documentLocation']
                     
-                    query = body.get('query', 'does shravan know multi threading?')
+                    query = body.get('query', 'where did shravan work?')
                     
                     local_file = self.download_from_s3(doc_location)
                     print(local_file)
@@ -135,11 +146,13 @@ class RAGProcessor:
                         document_text = self.extract_text_from_docx(local_file)
                     else:
                         raise ValueError("Unsupported file type")
-                        
+                    print('passed till this')
                     self.process_document(document_text, local_file)
-                    answer = self.answer_query(query)
-                    print(f"Query: {query}")
-                    print(f"Answer: {answer}")
+                    query = ['where did shravan work?', 'does shravan know cloud?','what are his projects?','did shravan work in threads?','does shravan have 2 years of work experience?']
+                    for q in query:
+                        answer = self.answer_query(q)
+                        print(f"Query: {q}")
+                        print(f"Answer: {answer}")
                     
                     self.sqs.delete_message(
                         QueueUrl=self.queue_url,
