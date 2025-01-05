@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain import hub
-from pinecone import Pinecone
+from pinecone.grpc import PineconeGRPC as Pinecone
 from pinecone import ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -30,8 +30,7 @@ class RAGProcessor:
     def setup_pinecone(self):
         self.pc = Pinecone(api_key=self.pinecone_api_key)
         self.index_name = "docs-rag-chatbot"
-        indexes = self.pc.list_indexes()
-        if self.index_name not in [idx['name'] for idx in indexes]:
+        if not self.pc.has_index(self.index_name):
             self.pc.create_index(
                 name=self.index_name,
                 dimension=1536,
@@ -68,7 +67,7 @@ class RAGProcessor:
             
     def extract_text_from_docx(self, file_path):
         doc = DocxDocument(file_path)
-        return "\n".join(paragraph.text for paragraph in doc.paragraphs)
+        return "".join(paragraph.text for paragraph in doc.paragraphs)
         
     def download_from_s3(self, s3_path):
         try:
@@ -87,37 +86,73 @@ class RAGProcessor:
                 print(f"- {obj['Key']}")
             raise
         
-    def process_document(self, document_text, source):
-        cleaned_text = document_text.replace('\n● ', '. ').replace('\n', ' ').strip()
-        text_splitter = RecursiveCharacterTextSplitter(
-          chunk_size=2000,  # Increased from 500
-    chunk_overlap=500,
-            separators=[". ", "●", "\n", " ", ""]
-        )
-        
-        doc_chunks = text_splitter.split_text(document_text)
-        
-        documents = [Document(
-    page_content=chunk, 
-    metadata={
-        "source": source,
-        "text": chunk  # Add text content
-    }
-) for chunk in doc_chunks]
-        print(documents)
-        
-        docsearch = PineconeVectorStore.from_documents(
-            documents=documents,
-            index_name=self.index_name,
-            embedding=self.embeddings,
-            namespace="plain-docx-namespace"
-        )
-        print('passed till doc inn pd 3')
-        retriever = docsearch.as_retriever(  search_kwargs={
-        "k": 4 
-    })
-        combine_docs_chain = create_stuff_documents_chain(self.llm, prompt=hub.pull("langchain-ai/retrieval-qa-chat"))
-        self.retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
+    def process_document(self, document_text, source,customerId):
+         
+                cleaned_text = (document_text
+        .replace('\n● ', '. ')
+        .replace('\n\n', '. ')
+        .replace('\n', ' ')
+        .replace('  ', ' ')
+        .strip())
+    
+    # Use much smaller chunks with careful overlap
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=150,  # Very small chunk size to get more chunks
+                    chunk_overlap=30,  # 20% overlap to maintain context
+                    separators=[". ", ".", "! ", "? ", "\n", " ", ""],  # More granular separators
+                    length_function=len,
+                    keep_separator=True
+                )
+                
+                # Split into initial chunks
+                doc_chunks = text_splitter.split_text(cleaned_text)
+                
+                # If still not enough chunks, split further
+                i=100
+                j=20
+                if len(doc_chunks) < 100:
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=100,  # Even smaller chunks
+                        chunk_overlap=20,
+                        separators=[" ", ""],  # Minimal separators for maximum splitting
+                    )
+                    doc_chunks = text_splitter.split_text(cleaned_text)
+                    print(len(doc_chunks))
+                    
+                
+                print(f"Numplain-docx-namespace-1235ber of chunks created: {len(doc_chunks)}")
+                
+                # Create documents with detailed metadata
+                documents = [Document(
+                    page_content=chunk,
+                    metadata={
+                        "source": source,
+                        "chunk_id": i,
+                        "total_chunks": len(doc_chunks),
+                        "customer_id": customerId,
+                        "char_length": len(chunk),
+                        "section": f"section_{i//10}"  # Group chunks into sections
+                    }
+                ) for i, chunk in enumerate(doc_chunks)]
+                
+                print(f"Final document count: {len(documents)}")
+                
+                docsearch = PineconeVectorStore.from_documents(
+                    documents=documents,
+                    index_name=self.index_name,
+                    embedding=self.embeddings,
+                    namespace=f"plain-docx-namespace-{str(customerId)}"
+                )
+                
+                # Adjust retriever for larger number of chunks
+                retriever = docsearch.as_retriever(
+                    search_kwargs={
+                        "k": 12
+                    }
+                )
+                
+                combine_docs_chain = create_stuff_documents_chain(self.llm, prompt=hub.pull("langchain-ai/retrieval-qa-chat"))
+                self.retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
         
     def answer_query(self, query):
         response = self.retrieval_chain.invoke({"input": query})
@@ -136,6 +171,7 @@ class RAGProcessor:
                     body = json.loads(message['Body'])
                     
                     doc_location = body['documentLocation']
+                    customerId=body['customerId']
                     
                     query = body.get('query', 'where did shravan work?')
                     
@@ -148,8 +184,8 @@ class RAGProcessor:
                     else:
                         raise ValueError("Unsupported file type")
                     print('passed till this')
-                    self.process_document(document_text, local_file)
-                    query = ['where did shravan work?', 'does shravan know cloud?','what are his projects?','did shravan work in threads?','does shravan have 2 years of work experience?']
+                    self.process_document(document_text, local_file,customerId)
+                    query = ['what is the future of Renewable energy?','what are the environmental impacts?']
                     for q in query:
                         answer = self.answer_query(q)
                         print(f"Query: {q}")
