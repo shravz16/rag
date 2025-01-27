@@ -50,7 +50,7 @@ class RAGProcessor:
         self.llm = ChatOpenAI(
             openai_api_key=self.openai_api_key,
             model_name='gpt-4',
-            temperature=0.3,  # Reduced for more focused responses
+            temperature=0.3,  
         max_tokens=1000
         )
         
@@ -96,26 +96,26 @@ class RAGProcessor:
         .replace('  ', ' ')
         .strip())
     
-    # Use much smaller chunks with careful overlap
+    
                 text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=150,  # Very small chunk size to get more chunks
-                    chunk_overlap=30,  # 20% overlap to maintain context
-                    separators=[". ", ".", "! ", "? ", "\n", " ", ""],  # More granular separators
+                    chunk_size=150,  
+                    chunk_overlap=30,  
+                    separators=[". ", ".", "! ", "? ", "\n", " ", ""],  
                     length_function=len,
                     keep_separator=True
                 )
                 
-                # Split into initial chunks
+                
                 doc_chunks = text_splitter.split_text(cleaned_text)
                 
-                # If still not enough chunks, split further
+                
                 i=100
                 j=20
                 if len(doc_chunks) < 100:
                     text_splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=100,  # Even smaller chunks
+                        chunk_size=100,  
                         chunk_overlap=20,
-                        separators=[" ", ""],  # Minimal separators for maximum splitting
+                        separators=[" ", ""],  
                     )
                     doc_chunks = text_splitter.split_text(cleaned_text)
                     print(len(doc_chunks))
@@ -123,7 +123,7 @@ class RAGProcessor:
                 
                 print(f"Numplain-docx-namespace-1235ber of chunks created: {len(doc_chunks)}")
                 
-                # Create documents with detailed metadata
+                
                 documents = [Document(
                     page_content=chunk,
                     metadata={
@@ -132,7 +132,7 @@ class RAGProcessor:
                         "total_chunks": len(doc_chunks),
                         "customer_id": customerId,
                         "char_length": len(chunk),
-                        "section": f"section_{i//10}"  # Group chunks into sections
+                        "section": f"section_{i//10}"  
                     }
                 ) for i, chunk in enumerate(doc_chunks)]
                 
@@ -145,7 +145,7 @@ class RAGProcessor:
                     namespace=f"plain-docx-namespace-{str(customerId)}"
                 )
                 
-                # Adjust retriever for larger number of chunks
+                
                 retriever = docsearch.as_retriever(
                     search_kwargs={
                         "k": 12
@@ -204,7 +204,7 @@ class RAGProcessor:
                     return False
         return False
 
-# Initialize and run
+
 processor = RAGProcessor(
     queue_url="https://sqs.us-east-2.amazonaws.com/339712897205/rag",
     pinecone_api_key="1f784203-27de-487e-90be-b2bff7b3b8f8",
